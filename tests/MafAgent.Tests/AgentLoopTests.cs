@@ -17,8 +17,8 @@ public class AgentLoopTests
         Assert.Equal(AgentLoopStopReason.TaskComplete, result.StopReason);
         Assert.Equal(2, result.Iterations);
         Assert.Equal("Task complete.", result.LastResponse);
-        Assert.Equal(27, result.Usage.TotalTokens);
-        Assert.Equal(0.02m, result.Usage.EstimatedCostUsd);
+        Assert.Equal(27, result.Usage.CombinedTotalTokens);
+        Assert.Equal(0.02m, result.Usage.CombinedEstimatedCostUsd);
         Assert.Equal("Working on it.", modelClient.Requests[1].PreviousResponse);
     }
 

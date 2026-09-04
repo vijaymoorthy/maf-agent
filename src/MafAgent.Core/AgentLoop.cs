@@ -16,7 +16,7 @@ public sealed class AgentLoop
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(task);
 
-        var totalUsage = ModelUsage.None;
+        var totalUsage = AgentUsage.None;
         string? previousResponse = null;
 
         for (var iteration = 1; iteration <= _options.MaxIterations; iteration++)
@@ -25,11 +25,11 @@ public sealed class AgentLoop
                 task,
                 previousResponse,
                 iteration,
-                _options.MaxTotalTokens - totalUsage.TotalTokens,
-                _options.MaxTotalCostUsd - totalUsage.EstimatedCostUsd);
+                _options.MaxTotalTokens - totalUsage.CombinedTotalTokens,
+                _options.MaxTotalCostUsd - totalUsage.CombinedEstimatedCostUsd);
 
             var response = await _modelClient.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
-            totalUsage = totalUsage.Add(response.Usage);
+            totalUsage = totalUsage.AddModel(response.Usage);
             previousResponse = response.Content;
 
             if (response.IsTaskComplete)
@@ -37,8 +37,8 @@ public sealed class AgentLoop
                 return new AgentLoopResult(response.Content, iteration, totalUsage, AgentLoopStopReason.TaskComplete);
             }
 
-            if (totalUsage.TotalTokens >= _options.MaxTotalTokens ||
-                totalUsage.EstimatedCostUsd >= _options.MaxTotalCostUsd)
+            if (totalUsage.CombinedTotalTokens >= _options.MaxTotalTokens ||
+                totalUsage.CombinedEstimatedCostUsd >= _options.MaxTotalCostUsd)
             {
                 return new AgentLoopResult(response.Content, iteration, totalUsage, AgentLoopStopReason.BudgetExceeded);
             }
@@ -74,15 +74,21 @@ public sealed record ModelRequest(
     string? PreviousResponse,
     int Iteration,
     long RemainingTokenBudget,
-    decimal RemainingCostBudgetUsd);
+    decimal RemainingCostBudgetUsd,
+    IReadOnlyList<ToolDefinition>? AvailableTools = null,
+    IReadOnlyList<ToolResult>? ToolResults = null);
 
-public sealed record ModelResponse(string Content, bool IsTaskComplete, ModelUsage Usage);
+public sealed record ModelResponse(
+    string Content,
+    bool IsTaskComplete,
+    ModelUsage Usage,
+    IReadOnlyList<ToolCall>? ToolCalls = null);
 
 public sealed record ModelUsage(long InputTokens, long OutputTokens, decimal EstimatedCostUsd)
 {
     public static ModelUsage None { get; } = new(0, 0, 0m);
 
-    public long TotalTokens => InputTokens + OutputTokens;
+    public long TotalTokens => checked(InputTokens + OutputTokens);
 
     public ModelUsage Add(ModelUsage other)
     {
@@ -95,10 +101,46 @@ public sealed record ModelUsage(long InputTokens, long OutputTokens, decimal Est
     }
 }
 
+public sealed record ToolUsage(long InputTokens, long OutputTokens, decimal EstimatedCostUsd)
+{
+    public static ToolUsage None { get; } = new(0, 0, 0m);
+
+    public long TotalTokens => checked(InputTokens + OutputTokens);
+}
+
+public sealed record AgentUsage(ModelUsage Model, ToolUsage Tools)
+{
+    public static AgentUsage None { get; } = new(ModelUsage.None, ToolUsage.None);
+
+    public long CombinedTotalTokens => checked(Model.TotalTokens + Tools.TotalTokens);
+
+    public decimal CombinedEstimatedCostUsd => Model.EstimatedCostUsd + Tools.EstimatedCostUsd;
+
+    public AgentUsage AddModel(ModelUsage usage)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+
+        return this with { Model = Model.Add(usage) };
+    }
+
+    public AgentUsage AddTool(ToolUsage usage)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+
+        return this with
+        {
+            Tools = new ToolUsage(
+                checked(Tools.InputTokens + usage.InputTokens),
+                checked(Tools.OutputTokens + usage.OutputTokens),
+                Tools.EstimatedCostUsd + usage.EstimatedCostUsd)
+        };
+    }
+}
+
 public sealed record AgentLoopResult(
     string? LastResponse,
     int Iterations,
-    ModelUsage Usage,
+    AgentUsage Usage,
     AgentLoopStopReason StopReason);
 
 public enum AgentLoopStopReason
