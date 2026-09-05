@@ -1,3 +1,5 @@
+> **Superseded:** This plan describes the hand-rolled tool registry and invocation loop. It is superseded by [2026-09-05-maf-migration.md](2026-09-05-maf-migration.md), which replaces those abstractions with `ChatClientAgent`, `AIFunctionFactory`, and MAF invocation middleware. Keep this document as historical context only.
+
 ## Plan: Add Typed Tool Support
 
 Extend the host-agnostic Core loop so a model response can request registered tools, the loop invokes them safely, and the next model turn receives structured tool results. Preserve the existing hard iteration cap and cumulative token/cost budget; expose model and tool usage separately while enforcing limits against their combined totals.
